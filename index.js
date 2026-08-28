@@ -3,10 +3,8 @@ const { processCorpus } = require('./corpus');
 
 const app = express();
 
-// Use express.json with a limit to handle large payloads
 app.use(express.json({ limit: '100mb' }));
 
-// Middleware to catch syntax errors in JSON payloads
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     return res.status(400).json({ error: 'INVALID_INPUT' });
@@ -14,17 +12,24 @@ app.use((err, req, res, next) => {
   next();
 });
 
-// POST /build-corpus endpoint
 app.post('/build-corpus', (req, res) => {
   const body = req.body;
-  if (!body) {
+  if (!body || typeof body !== 'object') {
     return res.status(400).json({ error: 'INVALID_INPUT' });
   }
 
   const { policy, objects } = body;
   
-  // Validation: A missing policy or non-array objects returns HTTP 400 with exactly {"error":"INVALID_INPUT"}
-  if (policy === undefined || !Array.isArray(objects)) {
+  // Stricter request validation:
+  // policy must be present, must be an object (not null, not array)
+  // objects must be an array
+  if (
+    policy === undefined || 
+    policy === null || 
+    typeof policy !== 'object' || 
+    Array.isArray(policy) || 
+    !Array.isArray(objects)
+  ) {
     return res.status(400).json({ error: 'INVALID_INPUT' });
   }
 

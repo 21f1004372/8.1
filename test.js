@@ -30,7 +30,7 @@ const sim = calculateJaccardSimilarity(setA, setB);
 assert.strictEqual(sim, 2/3);
 console.log('✓ Jaccard similarity tests passed.');
 
-// 5. Object Rejection Tests
+// 5. Object Rejection Tests - Multiple errors & Independent JSONL/SCHEMA check
 const payloadWithObjErrors = {
   policy: {
     minTime: "2026-01-01T00:00:00Z",
@@ -44,7 +44,7 @@ const payloadWithObjErrors = {
       fetchedGeneration: "def",
       crc32c: "xyz",
       schemaId: "training-v2",
-      content: "not valid jsonl"
+      content: "not valid jsonl\n" + JSON.stringify({ id: "row-1", entity: "A", eventTime: "2026-01-02T12:00:00Z", revision: -1, text: "invalid-schema" })
     }
   ]
 };
@@ -58,7 +58,8 @@ assert.ok(rejectedCodes.includes('GENERATION_INVALID'));
 assert.ok(rejectedCodes.includes('GENERATION_MISMATCH'));
 assert.ok(rejectedCodes.includes('CRC32C_INVALID'));
 assert.ok(rejectedCodes.includes('SCHEMA_INVALID'));
-console.log('✓ Object rejection validation tests passed.');
+assert.ok(rejectedCodes.includes('JSONL_INVALID'));
+console.log('✓ Object rejection validation tests (including independent JSONL & SCHEMA) passed.');
 
 // 6. Deduplication and tie-breaking test
 const deduplicationPayload = {
@@ -72,14 +73,13 @@ const deduplicationPayload = {
       uri: "gs://bucket/data",
       generation: "123",
       fetchedGeneration: "123",
-      crc32c: "", // set below
+      crc32c: "",
       schemaId: "training-v1",
       content: [
-        // Two rows with same entity, eventTime, text (canonicalized)
         JSON.stringify({ id: "row-1", entity: "A", eventTime: "2026-01-02T12:00:00Z", revision: 1, text: "hello" }),
-        JSON.stringify({ id: "row-2", entity: "A", eventTime: "2026-01-02T12:00:00Z", revision: 2, text: "hello" }), // Winner due to higher revision
+        JSON.stringify({ id: "row-2", entity: "A", eventTime: "2026-01-02T12:00:00Z", revision: 2, text: "hello" }),
         JSON.stringify({ id: "row-3", entity: "B", eventTime: "2026-01-02T12:00:00Z", revision: 1, text: "world" }),
-        JSON.stringify({ id: "row-4", entity: "B", eventTime: "2026-01-02T12:00:00Z", revision: 1, text: "world" })  // row-3 is winner due to byte-smallest ID
+        JSON.stringify({ id: "row-4", entity: "B", eventTime: "2026-01-02T12:00:00Z", revision: 1, text: "world" })
       ].join('\n')
     }
   ]
@@ -87,7 +87,6 @@ const deduplicationPayload = {
 deduplicationPayload.objects[0].crc32c = calculateCrc32c(Buffer.from(deduplicationPayload.objects[0].content, 'utf8'));
 
 const dedupResult = processCorpus(deduplicationPayload);
-// Winners: row-2, row-3. Rejected: row-1, row-4 (both DUPLICATE)
 assert.strictEqual(dedupResult.rejectedRows.length, 2);
 assert.deepStrictEqual(dedupResult.rejectedRows[0], { id: "row-1", reasonCodes: ["DUPLICATE"] });
 assert.deepStrictEqual(dedupResult.rejectedRows[1], { id: "row-4", reasonCodes: ["DUPLICATE"] });
@@ -105,7 +104,7 @@ const invalidPolicyPayload = {
       uri: "gs://bucket/data",
       generation: "123",
       fetchedGeneration: "123",
-      crc32c: "", // set below
+      crc32c: "",
       schemaId: "training-v1",
       content: JSON.stringify({ id: "row-1", entity: "A", eventTime: "2026-01-02T12:00:00Z", revision: 1, text: "hello" })
     }

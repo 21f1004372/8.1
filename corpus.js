@@ -126,35 +126,35 @@ function processCorpus(body) {
             parsedRow = JSON.parse(line);
           } catch (e) {
             hasJsonError = true;
-            break;
+            continue;
           }
 
           if (!parsedRow || typeof parsedRow !== 'object' || Array.isArray(parsedRow)) {
             hasSchemaError = true;
-            break;
+            continue;
           }
 
           const keys = Object.keys(parsedRow);
           if (keys.length !== 5 || !keys.includes('id') || !keys.includes('entity') || !keys.includes('eventTime') || !keys.includes('revision') || !keys.includes('text')) {
             hasSchemaError = true;
-            break;
+            continue;
           }
 
           const { id, entity, eventTime, revision, text } = parsedRow;
           if (typeof id !== 'string' || typeof entity !== 'string' || typeof eventTime !== 'string' || typeof text !== 'string') {
             hasSchemaError = true;
-            break;
+            continue;
           }
 
-          if (!Number.isInteger(revision) || revision < 0 || !Number.isSafeInteger(revision)) {
+          if (typeof revision !== 'number' || !Number.isInteger(revision) || revision < 0 || !Number.isSafeInteger(revision)) {
             hasSchemaError = true;
-            break;
+            continue;
           }
 
           const normEventTime = parseAndNormalizeDate(eventTime);
           if (!normEventTime) {
             hasSchemaError = true;
-            break;
+            continue;
           }
 
           parsedRows.push({
@@ -169,9 +169,11 @@ function processCorpus(body) {
 
         if (hasJsonError) {
           reasonCodes.add('JSONL_INVALID');
-        } else if (hasSchemaError) {
+        }
+        if (hasSchemaError) {
           reasonCodes.add('SCHEMA_INVALID');
-        } else {
+        }
+        if (reasonCodes.size === 0) {
           // Object is completely valid, cache rows for later processing
           obj.validRows = parsedRows;
         }
@@ -207,7 +209,6 @@ function processCorpus(body) {
   }
 
   // 3. Deduplication of Retained Rows
-  // Group by JSON tuple [entity, eventTime, text] (canonicalized/normalized values)
   const groups = new Map();
   for (const row of retainedRows) {
     const key = JSON.stringify([row.canonicalEntity, row.normalizedEventTime, row.canonicalText]);
@@ -218,10 +219,9 @@ function processCorpus(body) {
   }
 
   const survivedDeduplication = [];
-  const rejectedRowsMap = new Map(); // id -> Set of reason codes
+  const rejectedRowsMap = new Map();
 
   for (const [key, rows] of groups.entries()) {
-    // Find winner: highest revision, tie-break by UTF-8-byte-smallest ID
     let winner = rows[0];
     for (let i = 1; i < rows.length; i++) {
       const current = rows[i];
@@ -236,7 +236,6 @@ function processCorpus(body) {
     
     survivedDeduplication.push(winner);
     
-    // All other rows are rejected as DUPLICATE
     for (const r of rows) {
       if (r !== winner) {
         if (!rejectedRowsMap.has(r.id)) {
@@ -256,9 +255,6 @@ function processCorpus(body) {
       }
       rejectedRowsMap.get(row.id).add('POLICY_INVALID');
     } else {
-      // check window
-      // minTime and maxTime are normalized UTC strings, row.normalizedEventTime is normalized UTC string
-      // lexical comparison works perfectly for normalized UTC strings of the same format YYYY-MM-DDTHH:mm:ss.sssZ
       if (row.normalizedEventTime < minTime || row.normalizedEventTime > maxTime) {
         if (!rejectedRowsMap.has(row.id)) {
           rejectedRowsMap.set(row.id, new Set());
@@ -289,10 +285,8 @@ function processCorpus(body) {
     }
   }
 
-  // Cache train word sets for contamination checking
   const trainWordSets = trainSplit.map(row => getWordSet(row.canonicalText));
 
-  // Contamination Check function
   function isContaminated(rowText, trainSets, threshold) {
     const valSet = getWordSet(rowText);
     for (const trainSet of trainSets) {
@@ -331,7 +325,6 @@ function processCorpus(body) {
 
   // 6. Serialization and Digests calculation
   function serializeAndDigestSplit(splitRows) {
-    // Sort rows by UTF-8 bytes of ID, then break ties by compact JSON of the ordered row
     const sorted = [...splitRows].sort((a, b) => {
       const cmp = compareUtf8(a.id, b.id);
       if (cmp !== 0) return cmp;
@@ -380,7 +373,6 @@ function processCorpus(body) {
   const valRes = serializeAndDigestSplit(finalValidationSplit);
   const testRes = serializeAndDigestSplit(finalTestSplit);
 
-  // Format Rejected Rows list
   const rejectedRows = [];
   for (const [id, codes] of rejectedRowsMap.entries()) {
     rejectedRows.push({
@@ -389,7 +381,6 @@ function processCorpus(body) {
     });
   }
 
-  // Sort lists
   rejectedObjects.sort(compareRejectedObjects);
   rejectedRows.sort(compareRejectedRows);
   lineage.sort(compareLineage);

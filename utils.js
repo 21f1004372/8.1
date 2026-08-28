@@ -30,43 +30,6 @@ function isLeapYear(y) {
   return (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
 }
 
-function getDaysSinceEpoch(year, month, day) {
-  let days = 0;
-  if (year >= 1970) {
-    for (let y = 1970; y < year; y++) {
-      days += isLeapYear(y) ? 366 : 365;
-    }
-  } else {
-    for (let y = year; y < 1970; y++) {
-      days -= isLeapYear(y) ? 366 : 365;
-    }
-  }
-  for (let m = 1; m < month; m++) {
-    if (m === 2 && isLeapYear(year)) {
-      days += 29;
-    } else {
-      days += MONTH_DAYS[m - 1];
-    }
-  }
-  days += day - 1;
-  return days;
-}
-
-function formatEpochToUTC(epochMs) {
-  const date = new Date(Number(epochMs));
-  if (isNaN(date.getTime())) return null;
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(date.getUTCDate()).padStart(2, '0');
-  const h = String(date.getUTCHours()).padStart(2, '0');
-  const min = String(date.getUTCMinutes()).padStart(2, '0');
-  const s = String(date.getUTCSeconds()).padStart(2, '0');
-  const ms = String(date.getUTCMilliseconds()).padStart(3, '0');
-  
-  const yStr = String(y).padStart(4, '0');
-  return `${yStr}-${m}-${d}T${h}:${min}:${s}.${ms}Z`;
-}
-
 function parseAndNormalizeDate(dateStr) {
   if (typeof dateStr !== 'string') return null;
   const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-](\d{2}):(\d{2}))$/);
@@ -104,13 +67,28 @@ function parseAndNormalizeDate(dateStr) {
     offsetMinutes = tzSign * (tzHours * 60 + tzMins);
   }
   
-  const days = getDaysSinceEpoch(year, month, day);
-  let totalMs = BigInt(days) * 86400000n + BigInt(hour * 3600 + minute * 60 + second) * 1000n + BigInt(ms);
-  totalMs -= BigInt(offsetMinutes) * 60000n;
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(hour, minute, second, ms);
+  let totalMs = date.getTime();
+  if (isNaN(totalMs)) return null;
   
-  return formatEpochToUTC(totalMs);
+  totalMs -= offsetMinutes * 60 * 1000;
+  
+  const normDate = new Date(totalMs);
+  const y = normDate.getUTCFullYear();
+  const m = String(normDate.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(normDate.getUTCDate()).padStart(2, '0');
+  const h = String(normDate.getUTCHours()).padStart(2, '0');
+  const min = String(normDate.getUTCMinutes()).padStart(2, '0');
+  const s = String(normDate.getUTCSeconds()).padStart(2, '0');
+  const milli = String(normDate.getUTCMilliseconds()).padStart(3, '0');
+  
+  const yStr = String(y).padStart(4, '0');
+  return `${yStr}-${m}-${d}T${h}:${min}:${s}.${milli}Z`;
 }
 
+// 3. Unicode Canonicalization
 function canonicalizeText(str) {
   if (typeof str !== 'string') return "";
   let nfkc = str.normalize('NFKC');
@@ -120,6 +98,7 @@ function canonicalizeText(str) {
   return collapsed;
 }
 
+// 4. Jaccard Similarity Word-Set Tokenizer
 function getWordSet(text) {
   const words = text.match(/[\p{L}\p{N}]+/gu);
   if (!words) return new Set();
